@@ -26,8 +26,33 @@ export function twitterPageWorldRunner(input: PageWorldArgs): Promise<PageWorldR
 		const perfUrls = (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
 			.map(e => e.name)
 			.filter(u => /\.js(\?|$)/.test(u));
-		const allUrls = Array.from(new Set([...scriptUrls, ...perfUrls]));
-		log(`script[src]=${scriptUrls.length} perf-js=${perfUrls.length} unique=${allUrls.length}`);
+		const linkUrls = (Array.from(document.querySelectorAll('link[rel="modulepreload"], link[rel="preload"][as="script"]')) as HTMLLinkElement[])
+			.map(l => l.href);
+
+		// SPAs (X especially) routinely call performance.clearResourceTimings() and
+		// remove <script src> nodes after boot. Falling back to an HTML re-fetch of
+		// the current URL is the only reliable way to get the bundle paths back —
+		// X serves them in the SSR'd HTML.
+		let htmlUrls: string[] = [];
+		if (scriptUrls.length === 0 && perfUrls.length === 0 && linkUrls.length === 0) {
+			try {
+				const r = await fetch(location.href, { credentials: 'include' });
+				if (r.ok) {
+					const html = await r.text();
+					const set = new Set<string>();
+					const re = /(?:src|href)=["']([^"']+\.js[^"']*)["']/g;
+					let mm: RegExpExecArray | null;
+					while ((mm = re.exec(html)) !== null) set.add(mm[1]);
+					htmlUrls = [...set];
+					log(`HTML re-fetch found ${htmlUrls.length} JS URLs`);
+				}
+			} catch (e) {
+				log(`HTML re-fetch failed: ${(e as Error).message}`);
+			}
+		}
+
+		const allUrls = Array.from(new Set([...scriptUrls, ...perfUrls, ...linkUrls, ...htmlUrls]));
+		log(`script[src]=${scriptUrls.length} perf-js=${perfUrls.length} link=${linkUrls.length} html=${htmlUrls.length} unique=${allUrls.length}`);
 
 		const candidates = allUrls.filter(u => /(twimg\.com|x\.com).*\.js/.test(u));
 		log(`bundle candidates=${candidates.length}`);
