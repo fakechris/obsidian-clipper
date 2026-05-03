@@ -1,5 +1,5 @@
 import { SiteAdapter } from '../types';
-import { discoverQueryIds, fetchTweetDetail, fetchFollowersYouKnow } from './graphql';
+import { fetchTwitterDataInPageWorld } from './graphql';
 import { computeAuthorWeight, WeightSignals } from './weight';
 
 const STATUS_PATH_RE = /^\/[A-Za-z0-9_]+\/status\/(\d+)/;
@@ -36,52 +36,55 @@ async function extract(_doc: Document, url: string): Promise<Record<string, stri
 	const m = u.pathname.match(STATUS_PATH_RE);
 	if (!m) return {};
 	const tweetId = m[1];
+	console.log('[twitter-adapter] extract starting for tweet', tweetId);
 
-	const queryIds = await discoverQueryIds();
-	const tweetDetailQid = queryIds['TweetDetail'];
-	const fykQid = queryIds['FollowersYouKnow'];
-	if (!tweetDetailQid) {
-		console.warn('[twitter-adapter] could not discover TweetDetail queryId');
-		return {};
+	let pageData;
+	try {
+		pageData = await fetchTwitterDataInPageWorld(tweetId);
+	} catch (err) {
+		console.warn('[twitter-adapter] page-world fetch failed:', err);
+		return { 'twitter:_status': 'page_world_failed', 'twitter:_error': String((err as Error).message || err) };
 	}
 
-	const td = await fetchTweetDetail(tweetId, tweetDetailQid);
-	const focal = findFocalTweet(td);
-	if (!focal) return {};
+	console.log('[twitter-adapter] page-world trace:', pageData.trace.join(' | '));
+	if (pageData.error || !pageData.td) {
+		return {
+			'twitter:_status': pageData.error || 'no_td',
+			'twitter:_debug': pageData.trace.join('\n'),
+		};
+	}
+
+	const focal = findFocalTweet(pageData.td);
+	if (!focal) {
+		return { 'twitter:_status': 'no_focal_tweet', 'twitter:_debug': pageData.trace.join('\n') };
+	}
 
 	const user = focal?.core?.user_results?.result;
 	const userLegacy = user?.legacy || {};
 	const tweetLegacy = focal?.legacy || {};
 	const tweetViews = focal?.views || {};
-	const userId = user?.rest_id || tweetLegacy.user_id_str;
 
 	const followers = Number(userLegacy.followers_count || 0);
 	const following = Number(userLegacy.friends_count || 0);
 	const accountAgeYears = yearsSince(user?.core?.created_at);
 
-	// FollowersYouKnow — best-effort; failure does not block the rest.
 	let mutualsCount = 0;
 	const mutualHandles: string[] = [];
 	const mutualTopFollowers: number[] = [];
 	let mutualsBlueCount = 0;
-	if (userId && fykQid) {
-		try {
-			const fyk = await fetchFollowersYouKnow(userId, fykQid, 50);
-			const insts = fyk?.data?.user?.result?.timeline?.timeline?.instructions || [];
-			for (const ins of insts) {
-				for (const entry of (ins.entries || [])) {
-					if (!entry.entryId?.startsWith('user-')) continue;
-					const mu = entry?.content?.itemContent?.user_results?.result;
-					if (!mu) continue;
-					mutualsCount++;
-					const handle = mu?.core?.screen_name;
-					if (handle) mutualHandles.push(handle);
-					mutualTopFollowers.push(Number(mu?.legacy?.followers_count || 0));
-					if (mu?.is_blue_verified) mutualsBlueCount++;
-				}
+	if (pageData.fyk) {
+		const insts = pageData.fyk?.data?.user?.result?.timeline?.timeline?.instructions || [];
+		for (const ins of insts) {
+			for (const entry of (ins.entries || [])) {
+				if (!entry.entryId?.startsWith('user-')) continue;
+				const mu = entry?.content?.itemContent?.user_results?.result;
+				if (!mu) continue;
+				mutualsCount++;
+				const handle = mu?.core?.screen_name;
+				if (handle) mutualHandles.push(handle);
+				mutualTopFollowers.push(Number(mu?.legacy?.followers_count || 0));
+				if (mu?.is_blue_verified) mutualsBlueCount++;
 			}
-		} catch (err) {
-			console.warn('[twitter-adapter] FollowersYouKnow failed:', err);
 		}
 	}
 
@@ -103,7 +106,7 @@ async function extract(_doc: Document, url: string): Promise<Record<string, stri
 	};
 	const weight = computeAuthorWeight(signals);
 
-	const out: Record<string, string> = {
+	return {
 		'twitter:tweet_id': tweetId,
 		'twitter:tweet_url': `https://x.com/${user?.core?.screen_name || ''}/status/${tweetId}`,
 		'twitter:tweet_text': s(tweetLegacy.full_text),
@@ -147,9 +150,9 @@ async function extract(_doc: Document, url: string): Promise<Record<string, stri
 
 		'twitter:author_weight': s(weight.total),
 		'twitter:author_weight_breakdown': JSON.stringify(weight),
-	};
 
-	return out;
+		'twitter:_status': 'ok',
+	};
 }
 
 export const twitterAdapter: SiteAdapter = {
