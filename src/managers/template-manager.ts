@@ -52,6 +52,22 @@ export async function loadTemplates(): Promise<Template[]> {
 			console.log('No valid templates found, creating default templates');
 			templates = [createDefaultTemplate(), createTwitterTemplate()];
 			await saveTemplateSettings();
+		} else {
+			// One-shot migration: an earlier seed of the Twitter template shipped
+			// with a non-slash-delimited regex (treated as URL prefix and never
+			// matched) and a slim property set. Detect that exact shape and
+			// replace it with the current default. User-renamed or
+			// user-edited-trigger templates are left alone.
+			const twIdx = templates.findIndex(t => t.name === 'Twitter');
+			if (twIdx !== -1) {
+				const trig = templates[twIdx].triggers?.[0] || '';
+				const hasOldFormatTrigger = trig.length > 0 && !trig.startsWith('/');
+				if (hasOldFormatTrigger) {
+					console.log('Migrating Twitter template from old (URL-prefix) trigger format');
+					templates[twIdx] = createTwitterTemplate();
+					await saveTemplateSettings();
+				}
+			}
 		}
 
 		// After loading templates, update global property types
@@ -139,14 +155,23 @@ export function createTwitterTemplate(): Template {
 		id: genId(),
 		name: 'Twitter',
 		behavior: 'create',
-		noteNameFormat: '{{twitter:author_handle}} - {{twitter:tweet_id}}',
+		noteNameFormat: '{{twitter:author_handle}} - {{title}}',
 		path: 'Clippings/Twitter',
-		noteContentFormat: '{{twitter:tweet_text}}\n\n---\n\n{{content}}',
+		noteContentFormat: '{{content}}',
 		context: '',
 		properties: [
+			// Standard fields — same set as the Default template, overridden where
+			// Twitter has a stronger signal than Defuddle's generic extraction.
+			{ id: genId(), name: 'title', value: '{{title}}' },
 			{ id: genId(), name: 'source', value: '{{twitter:tweet_url}}' },
 			{ id: genId(), name: 'author', value: '[[{{twitter:author_name}}]]' },
 			{ id: genId(), name: 'author_handle', value: '{{twitter:author_handle}}' },
+			{ id: genId(), name: 'published', value: '{{twitter:tweet_created_at}}' },
+			{ id: genId(), name: 'created', value: '{{date}}' },
+			{ id: genId(), name: 'description', value: '{{description}}' },
+			{ id: genId(), name: 'tags', value: 'clippings, twitter' },
+
+			// Twitter-specific signals
 			{ id: genId(), name: 'author_bio', value: '{{twitter:author_bio}}' },
 			{ id: genId(), name: 'author_company', value: '{{twitter:author_company}}' },
 			{ id: genId(), name: 'author_weight', value: '{{twitter:author_weight}}', type: 'number' },
@@ -162,13 +187,12 @@ export function createTwitterTemplate(): Template {
 			{ id: genId(), name: 'tweet_retweets', value: '{{twitter:tweet_retweets}}', type: 'number' },
 			{ id: genId(), name: 'tweet_bookmarks', value: '{{twitter:tweet_bookmarks}}', type: 'number' },
 			{ id: genId(), name: 'tweet_views', value: '{{twitter:tweet_views}}', type: 'number' },
-			{ id: genId(), name: 'published', value: '{{twitter:tweet_created_at}}' },
-			{ id: genId(), name: 'created', value: '{{date}}' },
-			{ id: genId(), name: 'tags', value: 'clippings, twitter' }
 		],
+		// Slash-delimited regex per src/utils/triggers.ts; matches both x.com and
+		// twitter.com (and mobile.twitter.com) status-page URLs.
 		triggers: [
-			'https?://(?:[^./]+\\.)?(?:x|twitter)\\.com/[^/]+/status/\\d+'
-		]
+			'/^https?:\\/\\/(?:www\\.|mobile\\.)?(?:x|twitter)\\.com\\/[^\\/]+\\/status\\/\\d+/',
+		],
 	};
 }
 
