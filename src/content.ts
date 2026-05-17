@@ -12,6 +12,7 @@ import { saveFile } from './utils/file-utils';
 import { debugLog } from './utils/debug';
 import { updateSidebarWidth, addResizeHandle, cleanupResizeHandlers } from './utils/iframe-resize';
 import { parseForClip } from './utils/clip-utils';
+import { runSiteAdapters } from './utils/site-adapters';
 
 declare global {
 	interface Window {
@@ -222,6 +223,13 @@ declare global {
 				const extractedContent: { [key: string]: string } = {
 					...defuddled.variables,
 				};
+
+				// Site-specific enrichment (e.g. Twitter author follower stats).
+				// Runs after Defuddle so it can supplement, never block, the base clip.
+				const adapterTimeout = new Promise<Record<string, string>>(resolve => setTimeout(() => resolve({}), 8000));
+				const adapterData = await Promise.race([runSiteAdapters(document.URL, document), adapterTimeout])
+					.catch(() => ({}));
+				Object.assign(extractedContent, adapterData);
 
 				// Create a new DOMParser
 				const parser = new DOMParser();

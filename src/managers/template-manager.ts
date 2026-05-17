@@ -49,10 +49,25 @@ export async function loadTemplates(): Promise<Template[]> {
 		}
 
 		if (templates.length === 0) {
-			console.log('No valid templates found, creating default template');
-			const defaultTemplate = createDefaultTemplate();
-			templates = [defaultTemplate];
+			console.log('No valid templates found, creating default templates');
+			templates = [createDefaultTemplate(), createTwitterTemplate()];
 			await saveTemplateSettings();
+		} else {
+			// One-shot migration: an earlier seed of the Twitter template shipped
+			// with a non-slash-delimited regex (treated as URL prefix and never
+			// matched) and a slim property set. Detect that exact shape and
+			// replace it with the current default. User-renamed or
+			// user-edited-trigger templates are left alone.
+			const twIdx = templates.findIndex(t => t.name === 'Twitter');
+			if (twIdx !== -1) {
+				const trig = templates[twIdx].triggers?.[0] || '';
+				const hasOldFormatTrigger = trig.length > 0 && !trig.startsWith('/');
+				if (hasOldFormatTrigger) {
+					console.log('Migrating Twitter template from old (URL-prefix) trigger format');
+					templates[twIdx] = createTwitterTemplate();
+					await saveTemplateSettings();
+				}
+			}
 		}
 
 		// After loading templates, update global property types
@@ -61,8 +76,7 @@ export async function loadTemplates(): Promise<Template[]> {
 		return templates;
 	} catch (error) {
 		console.error('Error loading templates:', error);
-		const defaultTemplate = createDefaultTemplate();
-		templates = [defaultTemplate];
+		templates = [createDefaultTemplate(), createTwitterTemplate()];
 		await saveTemplateSettings();
 		return templates;
 	}
@@ -110,9 +124,13 @@ async function prepareTemplateForSave(template: Template): Promise<[string[], st
 	return [chunks, null];
 }
 
+function genId(): string {
+	return Date.now().toString() + Math.random().toString(36).slice(2, 11);
+}
+
 export function createDefaultTemplate(): Template {
 	return {
-		id: Date.now().toString() + Math.random().toString(36).slice(2, 11),
+		id: genId(),
 		name: getMessage('defaultTemplateName'),
 		behavior: 'create',
 		noteNameFormat: '{{title}}',
@@ -120,15 +138,61 @@ export function createDefaultTemplate(): Template {
 		noteContentFormat: '{{content}}',
 		context: "",
 		properties: [
-			{ id: Date.now().toString() + Math.random().toString(36).slice(2, 11), name: 'title', value: '{{title}}' },
-			{ id: Date.now().toString() + Math.random().toString(36).slice(2, 11), name: 'source', value: '{{url}}' },
-			{ id: Date.now().toString() + Math.random().toString(36).slice(2, 11), name: 'author', value: '{{author|split:", "|wikilink|join}}' },
-			{ id: Date.now().toString() + Math.random().toString(36).slice(2, 11), name: 'published', value: '{{published}}' },
-			{ id: Date.now().toString() + Math.random().toString(36).slice(2, 11), name: 'created', value: '{{date}}' },
-			{ id: Date.now().toString() + Math.random().toString(36).slice(2, 11), name: 'description', value: '{{description}}' },
-			{ id: Date.now().toString() + Math.random().toString(36).slice(2, 11), name: 'tags', value: 'clippings' }
+			{ id: genId(), name: 'title', value: '{{title}}' },
+			{ id: genId(), name: 'source', value: '{{url}}' },
+			{ id: genId(), name: 'author', value: '{{author|split:", "|wikilink|join}}' },
+			{ id: genId(), name: 'published', value: '{{published}}' },
+			{ id: genId(), name: 'created', value: '{{date}}' },
+			{ id: genId(), name: 'description', value: '{{description}}' },
+			{ id: genId(), name: 'tags', value: 'clippings' }
 		],
 		triggers: []
+	};
+}
+
+export function createTwitterTemplate(): Template {
+	return {
+		id: genId(),
+		name: 'Twitter',
+		behavior: 'create',
+		noteNameFormat: '{{twitter:author_handle}} - {{title}}',
+		path: 'Clippings/Twitter',
+		noteContentFormat: '{{content}}',
+		context: '',
+		properties: [
+			// Standard fields — same set as the Default template, overridden where
+			// Twitter has a stronger signal than Defuddle's generic extraction.
+			{ id: genId(), name: 'title', value: '{{title}}' },
+			{ id: genId(), name: 'source', value: '{{twitter:tweet_url}}' },
+			{ id: genId(), name: 'author', value: '[[{{twitter:author_name}}]]' },
+			{ id: genId(), name: 'author_handle', value: '{{twitter:author_handle}}' },
+			{ id: genId(), name: 'published', value: '{{twitter:tweet_created_at}}' },
+			{ id: genId(), name: 'created', value: '{{date}}' },
+			{ id: genId(), name: 'description', value: '{{description}}' },
+			{ id: genId(), name: 'tags', value: 'clippings, twitter' },
+
+			// Twitter-specific signals
+			{ id: genId(), name: 'author_bio', value: '{{twitter:author_bio}}' },
+			{ id: genId(), name: 'author_company', value: '{{twitter:author_company}}' },
+			{ id: genId(), name: 'author_weight', value: '{{twitter:author_weight}}', type: 'number' },
+			{ id: genId(), name: 'followers', value: '{{twitter:followers}}', type: 'number' },
+			{ id: genId(), name: 'following', value: '{{twitter:following}}', type: 'number' },
+			{ id: genId(), name: 'listed', value: '{{twitter:listed}}', type: 'number' },
+			{ id: genId(), name: 'mutuals_count', value: '{{twitter:mutuals_count}}', type: 'number' },
+			{ id: genId(), name: 'mutuals_top', value: '{{twitter:mutuals_top}}' },
+			{ id: genId(), name: 'i_follow', value: '{{twitter:i_follow}}', type: 'checkbox' },
+			{ id: genId(), name: 'follows_me', value: '{{twitter:follows_me}}', type: 'checkbox' },
+			{ id: genId(), name: 'blue_verified', value: '{{twitter:author_blue_verified}}', type: 'checkbox' },
+			{ id: genId(), name: 'tweet_likes', value: '{{twitter:tweet_likes}}', type: 'number' },
+			{ id: genId(), name: 'tweet_retweets', value: '{{twitter:tweet_retweets}}', type: 'number' },
+			{ id: genId(), name: 'tweet_bookmarks', value: '{{twitter:tweet_bookmarks}}', type: 'number' },
+			{ id: genId(), name: 'tweet_views', value: '{{twitter:tweet_views}}', type: 'number' },
+		],
+		// Slash-delimited regex per src/utils/triggers.ts; matches both x.com and
+		// twitter.com (and mobile.twitter.com) status-page URLs.
+		triggers: [
+			'/^https?:\\/\\/(?:www\\.|mobile\\.)?(?:x|twitter)\\.com\\/[^\\/]+\\/status\\/\\d+/',
+		],
 	};
 }
 

@@ -5,6 +5,7 @@ import { TextHighlightData } from './utils/highlighter';
 import { debounce } from './utils/debounce';
 import { Settings } from './types/types';
 import { debugLog } from './utils/debug';
+import { twitterPageWorldRunner } from './utils/site-adapters/twitter/page-world-runner';
 
 const YOUTUBE_EMBED_RULE_ID = 9001;
 const YOUTUBE_INNERTUBE_RULE_ID = 9002;
@@ -364,6 +365,22 @@ browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime
 
 		if (typedRequest.action === "extractContent" && sender.tab && sender.tab.id) {
 			browser.tabs.sendMessage(sender.tab.id, request).then(sendResponse);
+			return true;
+		}
+
+		if (typedRequest.action === "twitter:fetchInPageWorld" && sender.tab?.id) {
+			const args = (typedRequest as any).args;
+			chrome.scripting.executeScript({
+				target: { tabId: sender.tab.id },
+				world: 'MAIN',
+				func: twitterPageWorldRunner,
+				args: [args],
+			}).then((results) => {
+				const r = (results && results[0]) as any;
+				sendResponse({ ok: true, result: r?.result });
+			}).catch((err) => {
+				sendResponse({ ok: false, error: String((err as Error)?.message || err) });
+			});
 			return true;
 		}
 
