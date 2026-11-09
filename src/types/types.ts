@@ -22,8 +22,6 @@ export interface ExtractedContent {
 	[key: string]: string;
 }
 
-export type FilterFunction = (value: string, param?: string) => string | any[];
-
 export interface PromptVariable {
 	key: string;
 	prompt: string;
@@ -93,6 +91,7 @@ export interface Settings {
 		saveFile: number;
 		copyToClipboard: number;
 		share: number;
+		readerMode: number;
 	};
 	history: HistoryEntry[];
 	ratings: Rating[];
@@ -110,7 +109,7 @@ export interface ModelConfig {
 export interface HistoryEntry {
 	datetime: string;
 	url: string;
-	action: 'addToObsidian' | 'saveFile' | 'copyToClipboard' | 'share';
+	action: 'addToObsidian' | 'saveFile' | 'copyToClipboard' | 'share' | 'readerMode';
 	title?: string;
 	vault?: string;
 	path?: string;
